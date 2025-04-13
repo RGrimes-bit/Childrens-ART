@@ -1,0 +1,223 @@
+---
+title: "UNICEF Report: Children's Access to Antiretroviral Treatment (ART)"
+author: "Ronan"
+date: today
+format:
+  html:
+    embed-resources: true
+    code-fold: true
+    toc: true
+    toc-depth: 3
+    theme: flatly
+    css: styles.css
+    code-tools: true
+    code-copy: true
+---
+
+## Introduction
+
+The global HIV/AIDS epidemic continues to pose substantial public health challenges, with pediatric cases representing a particularly vulnerable population. Despite significant advancements in antiretroviral therapy (ART), access to treatment for children aged 0-14 years remains uneven across regions, reflecting persistent socioeconomic and healthcare disparities. This report critically examines the current state of pediatric ART coverage worldwide, with particular attention to the intersection between economic development and treatment accessibility. This study contributes to ongoing discussions about achieving universal health coverage and meeting Sustainable Development Goal targets for HIV/AIDS management in vulnerable demographic groups.
+
+## Data Analysis
+
+```{r}
+#| label: setup
+#| include: false
+library(tidyverse)
+library(plotly)
+library(countrycode)
+library(gapminder)
+library(viridis)
+library(scales)
+
+# Load data
+metadata <- read_csv("Data/unicef_metadata.csv")
+indicator2 <- read_csv("Data/unicef_indicator_2.csv")
+
+# Clean and prepare data
+art_data <- indicator2 %>%
+  filter(indicator == "Reported number of children (aged 0-14 years) receiving antiretroviral treatment (ART)")
+
+merged_data <- art_data %>%
+  left_join(metadata, by = c("alpha_3_code", "country"))
+```
+
+### World Map of ART Access for Children
+
+```{r}
+#| label: world-map
+#| fig-cap: "Global distribution of children receiving ART (most recent year available)"
+latest_art <- art_data %>%
+  group_by(country) %>%
+  filter(time_period == max(time_period)) %>%
+  ungroup()
+
+world_map_data <- map_data("world") %>%
+  mutate(
+    iso3c = countrycode(
+      sourcevar = region,
+      origin = "country.name",
+      destination = "iso3c",
+      warn = FALSE
+    )
+  ) %>%
+  left_join(latest_art, by = c("iso3c" = "alpha_3_code"))
+
+world_map <- ggplot(world_map_data) +
+  geom_polygon(
+    aes(x = long, y = lat, group = group, fill = obs_value),
+    color = "white", 
+    linewidth = 0.1
+  ) +
+  scale_fill_viridis(
+    name = "Children on ART",
+    na.value = "grey90",
+    option = "D",
+    breaks = c(0, 25000, 50000, 75000, 100000),  
+    labels = c("0", "25k", "50k", "75k", "100k"),  
+    guide = guide_colorbar(
+      barwidth = unit(0.5, "cm"),   
+      barheight = unit(4, "cm"),    
+      ticks.colour = "black",       
+      frame.colour = "black"        
+    )
+  ) +
+  theme_void() +
+  labs(title = "Global Distribution of Children Receiving ART Treatment") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "right",
+    legend.title = element_text(size = 9),
+    legend.text = element_text(size = 8)
+  )
+world_map
+```
+
+The world map highlights significant disparities in ART access for children, with Sub-Saharan Africa showing the highest concentrations. Countries like South Africa, Mozambique, and Uganda appear as hotspots, likely due to higher HIV prevalence and international aid efforts. In contrast, developed nations (North America, Europe, and parts of Asia) show minimal representation, possibly because of lower pediatric HIV rates. The visualization underscores the urgent need for targeted interventions in high-burden regions.
+
+### Top 10 Countries by ART Coverage
+
+```{r}
+#| label: bar-chart
+#| fig-cap: "Top 10 countries by number of children receiving ART (most recent year)"
+top_countries <- art_data %>%
+  group_by(country) %>%
+  filter(time_period == max(time_period)) %>%
+  ungroup() %>%
+  top_n(10, obs_value) %>%
+  arrange(desc(obs_value))
+
+bar_plot <- ggplot(top_countries, aes(x = reorder(country, obs_value), y = obs_value)) +
+  geom_col(fill = "#4292c6") +
+  labs(x = NULL, y = "Number of Children on ART", 
+       title = "Top 10 Countries by Children Receiving ART") +
+  coord_flip() +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 10))
+
+bar_plot
+```
+
+The bar chart reveals that Mozambique and South Africa lead in absolute numbers of children on ART, reflecting their high HIV burden and scaled-up treatment programs. East and Southern African nations (Uganda, Kenya, Zimbabwe) dominate the list, aligning with WHO priority regions. Notably, the Democratic Republic of Congo ranks lower despite its large population, suggesting gaps in healthcare access. The data emphasizes the success of ART programs in certain countries but highlights inequities in others.
+
+### Relationship Between GDP and ART Access
+
+```{r}
+#| label: scatterplot
+#| fig-cap: "Relationship between GDP per capita and children's ART access with linear regression"
+scatter_data <- merged_data %>%
+  drop_na(`GDP per capita (constant 2015 US$)`, obs_value)
+
+scatter_plot <- ggplot(scatter_data, 
+       aes(x = `GDP per capita (constant 2015 US$)`, y = obs_value)) +
+  
+  geom_point(alpha = 0.6, color = "#2171b5", size = 1) +
+  
+
+  geom_smooth(method = "lm", 
+              formula = y ~ x,
+              color = "#08306b",    
+              fill = "#9ecae1",     
+              se = TRUE,           
+              linewidth = 0.8) +  
+  
+  scale_x_continuous(labels = dollar) +
+  labs(x = "GDP per capita (constant 2015 US$)", 
+       y = "Children on ART",
+       title = "GDP vs. ART Access in Children (with Linear Regression)") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold"))
+
+scatter_plot
+
+```
+
+The scatterplot shows an L-shaped relationship: ART coverage rises sharply with GDP up to \~ 5,000–10,000, then plateaus. This suggests that basic economic development (e.g., healthcare infrastructure) is critical for initial ART scale-up, but beyond a threshold, additional wealth doesn’t correlate with increased coverage. Outliers (e.g., high-GDP countries with low ART numbers) may reflect low pediatric HIV incidence or data reporting differences.
+
+### ART Access Over Time
+
+```{r}
+#| label: time-series
+#| fig-cap: "Trend in children's ART access over time (2010-2020)"
+time_series_data <- art_data %>%
+  group_by(time_period) %>%
+  summarise(total_art = sum(obs_value, na.rm = TRUE))
+
+time_plot <- ggplot(time_series_data, aes(x = time_period, y = total_art)) +
+  geom_line(color = "#08519c", linewidth = 1.5) +  
+  geom_point(color = "#2171b5", size = 3) + 
+  scale_y_continuous(labels = scales::comma) +     
+  labs(
+    x = "Year", 
+    y = "Total Children on ART (Global)", 
+    title = "Global Trend in Children Receiving ART (2010-2020)",
+    caption = "Source: UNICEF Indicator Data"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+
+time_plot
+```
+
+The time-series chart indicates steady growth in global ART access, peaking around 2018–2020. The rise aligns with global initiatives like PEPFAR and UNAIDS targets, but the slowdown suggests future efforts must address persistent barriers (e.g., stigma, rural access). The data underscores progress but calls for renewed investment to reach underserved populations.
+
+## Conclusions and Recommendations
+
+**Key Insights on Global Access to ART for Children with HIV**:
+
+-   Significant disparities exist in access to antiretroviral treatment (ART) across regions.
+
+-   Sub-Saharan African countries (e.g., Mozambique, South Africa, Uganda) bear the highest burden of pediatric HIV, but have relatively better ART coverage compared to other regions.
+
+-   The relationship between economic development (GDP) and ART access follows an L-shaped curve:
+
+    -   ART coverage improves with GDP growth up to a threshold of **\$5,000–\$10,000** per capita.
+    -   Beyond this point, additional wealth does not significantly increase treatment rates.
+
+-   Global ART coverage for children has increased steadily between **2010 and 2018**, but growth has slowed in recent years, indicating emerging challenges.
+
+**Recommendations**:
+
+1.  **Increased Funding**: Direct more funds to pediatric HIV programs, especially in **low-income countries** (particularly **Sub-Saharan Africa**).
+
+2.  **Strengthen Healthcare Systems**: Invest in building **clinics**, training **healthcare workers**, and improving **supply chains** in undeserved areas.
+
+3.  **Enhanced Data Collection**: Prioritize efforts to improve data collection to monitor treatment coverage, identify gaps, and evaluate program effectiveness.
+
+```{r}
+#| include: false
+# Create directory if it doesn't exist
+if (!dir.exists("Images")) {
+  dir.create("Images")
+}
+
+# Save visualizations to Images folder
+ggsave("Images/world_map.png", plot = world_map, width = 10, height = 6, dpi = 300)
+ggsave("Images/bar_plot.png", plot = bar_plot, width = 8, height = 6, dpi = 300) 
+ggsave("Images/scatter_plot.png", plot = scatter_plot, width = 8, height = 6, dpi = 300)
+ggsave("Images/time_plot.png", plot = time_plot, width = 8, height = 6, dpi = 300)
+```
